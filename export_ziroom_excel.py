@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import html
 import json
 import re
@@ -62,6 +63,7 @@ DEFAULT_CONFIG_PATH = BASE_DIR / "config.json"
 DEFAULT_SOURCE_PATH = BASE_DIR / "source/自如网-租房信息网-提供地区的房屋合租信息及月租价格.html"
 
 RULE_OPERATORS = ("<=", ">=", "==", "!=", "<", ">", "不包含", "包含")
+DECIMAL_COLUMNS = {"面积(㎡)", "租金(元/月)", "单位面积价格", "小区地图最低价"}
 
 
 @dataclass
@@ -431,7 +433,6 @@ def label_width(label: str) -> int:
 
 
 def build_sheet_xml(headers: list[str], rows: list[dict[str, object]], widths: list[int]) -> str:
-    decimal_columns = {"面积(㎡)", "租金(元/月)", "单位面积价格", "小区地图最低价"}
     cols = "".join(
         f'<col min="{i}" max="{i}" width="{width}" customWidth="1"/>'
         for i, width in enumerate(widths, start=1)
@@ -449,7 +450,7 @@ def build_sheet_xml(headers: list[str], rows: list[dict[str, object]], widths: l
             sheet_cell(
                 f"{column_name(col)}{row_number}",
                 row.get(header),
-                style=3 if header in decimal_columns else 2,
+                style=3 if header in DECIMAL_COLUMNS else 2,
             )
             for col, header in enumerate(headers, start=1)
         ]
@@ -586,6 +587,24 @@ def write_xlsx(path: Path, rows: list[dict[str, object]], labels: list[str]) -> 
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for name, content in files.items():
             archive.writestr(name, content)
+
+
+def csv_cell(value: object, header: str) -> str:
+    if value is None:
+        return ""
+    if header in DECIMAL_COLUMNS:
+        number = parse_number(value)
+        return "" if number is None else f"{number:.2f}"
+    return clean_xml_text(value)
+
+
+def write_csv(path: Path, rows: list[dict[str, object]], labels: list[str]) -> None:
+    headers, _ = build_headers(labels)
+    with path.open("w", encoding="utf-8-sig", newline="") as output:
+        writer = csv.writer(output)
+        writer.writerow(headers)
+        for row in rows:
+            writer.writerow([csv_cell(row.get(header), header) for header in headers])
 
 
 def read_source(path: Path) -> str:
@@ -761,8 +780,12 @@ def add_preference_marks(
         row["favorites"] = "⭐" if row_matches_entries(row, favorite_entries) else ""
 
 
+def csv_output_path(output_path: Path) -> Path:
+    return output_path.with_suffix(".csv")
+
+
 def parse_args(argv: Iterable[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Export Ziroom source.html to Excel.")
+    parser = argparse.ArgumentParser(description="Export Ziroom saved HTML to Excel and CSV.")
     parser.add_argument(
         "--blocklist",
         action="append",
@@ -800,7 +823,12 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
         help="config JSON file",
     )
     parser.add_argument("source", nargs="?", default=DEFAULT_SOURCE_PATH, help="HTML file path")
-    parser.add_argument("output", nargs="?", default="ziroom_houses.xlsx", help="output .xlsx path")
+    parser.add_argument(
+        "output",
+        nargs="?",
+        default="ziroom_houses.xlsx",
+        help="output .xlsx path; a .csv with the same base name is also exported",
+    )
     return parser.parse_args(list(argv))
 
 
@@ -832,7 +860,9 @@ def main(argv: Iterable[str] = sys.argv[1:]) -> int:
     rows = filter_rows_by_config(rows, config)
     sort_rows_by_config(rows, config)
     write_xlsx(output_path, rows, labels)
-    print(f"Exported {len(rows)} rows to {output_path}")
+    csv_path = csv_output_path(output_path)
+    write_csv(csv_path, rows, labels)
+    print(f"Exported {len(rows)} rows to {output_path} and {csv_path}")
     return 0
 
 

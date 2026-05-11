@@ -2,7 +2,7 @@
 
 自如房源 Excel 导出工具。
 
-这个目录里的脚本会读取自如地图页保存下来的 HTML，解析房源列表，并导出为 `ziroom_houses.xlsx`。导出时会自动计算价格、单位面积价格、规则命中、黑名单、收藏、通勤时间、标签拆分等字段。
+这个目录里的脚本会读取自如地图页保存下来的 HTML，解析房源列表，并同时导出为 `ziroom_houses.xlsx` 和 `ziroom_houses.csv`。导出时会自动计算价格、单位面积价格、规则命中、黑名单、收藏、通勤时间、标签拆分等字段。
 
 ## 快速运行
 
@@ -22,12 +22,20 @@ source/自如网-租房信息网-提供地区的房屋合租信息及月租价�
 
 ```text
 ziroom_houses.xlsx
+ziroom_houses.csv
 ```
 
-也可以指定输入和输出：
+也可以指定输入和 Excel 输出名，CSV 会使用相同文件名主体：
 
 ```bash
 ./run_export.sh source/自如网-租房信息网-提供地区的房屋合租信息及月租价格.html result.xlsx
+```
+
+上面这条命令会生成：
+
+```text
+result.xlsx
+result.csv
 ```
 
 ## 常用文件
@@ -223,5 +231,5 @@ labels.txt
 ## 注意
 
 - 当前脚本只依赖 Python 标准库，不需要安装 `pandas`、`openpyxl`、`bs4`。
-- 如果 Excel 正在打开 `ziroom_houses.xlsx`，系统可能生成临时文件或导致覆盖异常；建议先关闭 Excel 再导出。
+- 如果 Excel 正在打开 `ziroom_houses.xlsx` 或 `ziroom_houses.csv`，系统可能生成临时文件或导致覆盖异常；建议先关闭 Excel 再导出。
 - 如果规则字段写错，脚本会报 `Unknown rule field`，把字段名改成 Excel 表头即可。

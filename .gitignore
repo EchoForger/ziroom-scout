@@ -1,6 +1,7 @@
 source
 
 *.xlsx
+*.csv
 
 
 __pycache__

@@ -12,4 +12,4 @@ if [[ ! -f "$SOURCE_FILE" ]]; then
 fi
 
 python3 export_ziroom_excel.py "$SOURCE_FILE" "$OUTPUT_FILE"
-echo "完成: $OUTPUT_FILE"
+echo "完成"
