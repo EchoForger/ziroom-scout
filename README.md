@@ -42,6 +42,7 @@ result.csv
 
 ```text
 config.json                 全局配置
+links.json                  房源ID 到自如详情页链接
 labels.txt                  要拆成独立列的标签
 通勤.json                    小区到公司骑行通勤时间
 preference/rules.txt        显性筛选规则
@@ -141,6 +142,18 @@ block!=❌
 复式 | 独立阳台
 ```
 
+## links.json
+
+表示房源 ID 到详情页链接的映射。房源 ID 默认是 `名称 + 面积`，例如：
+
+```json
+{
+  "合租·圆明园西路3号院3居·01卧14.69㎡": "https://www.ziroom.com/x/807772296.html"
+}
+```
+
+导出时会把 Excel 的 `名称` 列变成可点击链接。如果页面里出现重复房源导致 `房源ID` 自动追加楼层，脚本仍会用原始 `名称 + 面积` 回退匹配。
+
 ## 通勤.json
 
 表示小区到公司的骑行通勤时间，单位按你自己约定，目前建议填分钟。
@@ -218,6 +231,7 @@ config.json
 preference/rules.txt
 preference/block.txt
 preference/favorites.txt
+links.json
 labels.txt
 通勤.json
 ```

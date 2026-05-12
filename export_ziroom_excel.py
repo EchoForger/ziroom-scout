@@ -60,6 +60,7 @@ DEFAULT_RULES_PATHS = (
 DEFAULT_COMMUTE_PATH = BASE_DIR / "通勤.json"
 DEFAULT_LABELS_PATH = BASE_DIR / "labels.txt"
 DEFAULT_CONFIG_PATH = BASE_DIR / "config.json"
+DEFAULT_LINKS_PATH = BASE_DIR / "links.json"
 DEFAULT_SOURCE_PATH = BASE_DIR / "source/自如网-租房信息网-提供地区的房屋合租信息及月租价格.html"
 
 RULE_OPERATORS = ("<=", ">=", "==", "!=", "<", ">", "不包含", "包含")
@@ -359,6 +360,7 @@ def extract_rows(root: Node) -> list[dict[str, object]]:
 
         rows.append(
             {
+                "_链接匹配ID": house_id,
                 "房源ID": house_id,
                 "名称": name,
                 "租住类型": lease_type,
@@ -432,6 +434,40 @@ def label_width(label: str) -> int:
     return max(10, min(24, len(label) * 2 + 4))
 
 
+def build_hyperlinks_xml(headers: list[str], rows: list[dict[str, object]]) -> str:
+    if "名称" not in headers:
+        return ""
+
+    link_column = column_name(headers.index("名称") + 1)
+    links: list[str] = []
+    for row_number, row in enumerate(rows, start=2):
+        if not row.get("房源链接"):
+            continue
+        links.append(f'<hyperlink ref="{link_column}{row_number}" r:id="rId{len(links) + 1}"/>')
+
+    return f"<hyperlinks>{''.join(links)}</hyperlinks>" if links else ""
+
+
+def build_sheet_relationships(rows: list[dict[str, object]]) -> str | None:
+    links = [str(row.get("房源链接")) for row in rows if row.get("房源链接")]
+    if not links:
+        return None
+
+    relationships = []
+    for index, link in enumerate(links, start=1):
+        target = html.escape(clean_xml_text(link), quote=True)
+        relationships.append(
+            f'<Relationship Id="rId{index}" '
+            'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" '
+            f'Target="{target}" TargetMode="External"/>'
+        )
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        f"{''.join(relationships)}</Relationships>"
+    )
+
+
 def build_sheet_xml(headers: list[str], rows: list[dict[str, object]], widths: list[int]) -> str:
     cols = "".join(
         f'<col min="{i}" max="{i}" width="{width}" customWidth="1"/>'
@@ -446,11 +482,18 @@ def build_sheet_xml(headers: list[str], rows: list[dict[str, object]], widths: l
     row_xml.append('<row r="1">' + "".join(header_cells) + "</row>")
 
     for row_number, row in enumerate(rows, start=2):
+        def cell_style(header: str) -> int:
+            if header == "名称" and row.get("房源链接"):
+                return 4
+            if header in DECIMAL_COLUMNS:
+                return 3
+            return 2
+
         cells = [
             sheet_cell(
                 f"{column_name(col)}{row_number}",
                 row.get(header),
-                style=3 if header in DECIMAL_COLUMNS else 2,
+                style=cell_style(header),
             )
             for col, header in enumerate(headers, start=1)
         ]
@@ -473,6 +516,7 @@ def build_sheet_xml(headers: list[str], rows: list[dict[str, object]], widths: l
   <cols>{cols}</cols>
   <sheetData>{''.join(row_xml)}</sheetData>
   <autoFilter ref="{dimension}"/>
+  {build_hyperlinks_xml(headers, rows)}
 </worksheet>"""
 
 
@@ -558,9 +602,10 @@ def write_xlsx(path: Path, rows: list[dict[str, object]], labels: list[str]) -> 
 </Relationships>""",
         "xl/styles.xml": """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <fonts count="2">
+  <fonts count="3">
     <font><sz val="11"/><name val="Arial"/></font>
     <font><b/><sz val="11"/><name val="Arial"/></font>
+    <font><u/><color rgb="FF0563C1"/><sz val="11"/><name val="Arial"/></font>
   </fonts>
   <fills count="2">
     <fill><patternFill patternType="none"/></fill>
@@ -568,7 +613,7 @@ def write_xlsx(path: Path, rows: list[dict[str, object]], labels: list[str]) -> 
   </fills>
   <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
   <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-  <cellXfs count="4">
+  <cellXfs count="5">
     <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
     <xf numFmtId="0" fontId="1" fillId="1" borderId="0" xfId="0" applyFont="1" applyFill="1">
       <alignment horizontal="center" vertical="center"/>
@@ -579,10 +624,16 @@ def write_xlsx(path: Path, rows: list[dict[str, object]], labels: list[str]) -> 
     <xf numFmtId="2" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1">
       <alignment vertical="top" wrapText="1"/>
     </xf>
+    <xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1">
+      <alignment vertical="top" wrapText="1"/>
+    </xf>
   </cellXfs>
 </styleSheet>""",
         "xl/worksheets/sheet1.xml": build_sheet_xml(headers, rows, widths),
     }
+    sheet_relationships = build_sheet_relationships(rows)
+    if sheet_relationships:
+        files["xl/worksheets/_rels/sheet1.xml.rels"] = sheet_relationships
 
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for name, content in files.items():
@@ -630,6 +681,28 @@ def read_commute_data(path: Path) -> dict[str, object]:
     if not isinstance(data, dict):
         raise ValueError(f"Commute file must be a JSON object: {path}")
     return {str(key): value for key, value in data.items()}
+
+
+def read_links_data(path: Path) -> dict[str, str]:
+    content = read_optional_text(path).strip()
+    if not content:
+        return {}
+    data = json.loads(content)
+    if not isinstance(data, dict):
+        raise ValueError(f"Links file must be a JSON object: {path}")
+    return {str(key): str(value) for key, value in data.items()}
+
+
+def add_house_links(rows: list[dict[str, object]], links_data: dict[str, str]) -> None:
+    for row in rows:
+        match_ids = (
+            str(row.get("房源ID") or ""),
+            str(row.get("_链接匹配ID") or ""),
+        )
+        row["房源链接"] = next(
+            (links_data[match_id] for match_id in match_ids if match_id in links_data),
+            "",
+        )
 
 
 def read_config(path: Path) -> dict[str, object]:
@@ -765,7 +838,7 @@ def row_matches_entries(row: dict[str, object], entries: Iterable[str]) -> bool:
     searchable_text = " ".join(
         re.sub(r"\s+", " ", str(value)).strip()
         for key, value in row.items()
-        if key not in {"block", "favorites", "rules"} and value
+        if key not in {"block", "favorites", "rules"} and not key.startswith("_") and value
     )
     return any(entry in searchable_text for entry in entries)
 
@@ -822,6 +895,12 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
         default=DEFAULT_CONFIG_PATH,
         help="config JSON file",
     )
+    parser.add_argument(
+        "--links",
+        type=Path,
+        default=DEFAULT_LINKS_PATH,
+        help="house links JSON file keyed by 房源ID",
+    )
     parser.add_argument("source", nargs="?", default=DEFAULT_SOURCE_PATH, help="HTML file path")
     parser.add_argument(
         "output",
@@ -850,6 +929,7 @@ def main(argv: Iterable[str] = sys.argv[1:]) -> int:
     labels = read_preference_entries([args.labels])
     add_commute_values(rows, read_commute_data(args.commute))
     add_building_summaries(rows, extract_building_summaries(root))
+    add_house_links(rows, read_links_data(args.links))
     add_label_marks(rows, labels)
     add_preference_marks(
         rows,
